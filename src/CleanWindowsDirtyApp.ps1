@@ -1290,6 +1290,11 @@ function Show-UpgradeList {
     <# 可更新清单表格；编号按传入顺序，和手动挑选时的编号一致 #>
     param([array]$Items)
 
+    # 上一轮的失败原因留在清单备注里，刷新/翻页后仍然看得见
+    if ($null -eq $script:UpgradeFailNotes) { $script:UpgradeFailNotes = @{} }
+    $failLines = New-Object System.Collections.Generic.List[object]
+    $hasFail   = $false
+
     # 反复出现的分组话术不逐条重复，只保留有个性的备注
     $noteFreq = @{}
     foreach ($it in $Items) {
@@ -1306,6 +1311,17 @@ function Show-UpgradeList {
         $idx++
         $note = [string]$it.Note
         if ($note -and $noteFreq[$note] -ge 3) { $note = '' }
+
+        $id = [string]$it.Id
+        if ($script:UpgradeFailNotes.ContainsKey($id)) {
+            $reason = [string]$script:UpgradeFailNotes[$id]
+            if ($reason) {
+                # 失败原因优先占满备注列，不再拼原分组话术，避免被截断
+                $note = '失败：' + $reason
+                $failLines.Add([pscustomobject]@{ Index = $idx; Name = [string]$it.Name; Reason = $reason })
+                $hasFail = $true
+            }
+        }
 
         $size = '-'
         $key  = [string]$it.Id + '|' + [string]$it.Available
@@ -1327,11 +1343,28 @@ function Show-UpgradeList {
         $colors.Add((Get-LevelColor -Level $it.Level))
     }
 
+    $minWidths = @(5, 8, 24, 18, 18, 9, 14)
+    $hint = '分档：常规=工具/运行库，注意=客户端类，驱动=建议单独确认；大小探测不到时显示 -'
+    if ($hasFail) {
+        # 给「备注」列多让一点宽度，失败原因尽量不被省略
+        $minWidths = @(5, 8, 20, 16, 16, 8, 28)
+        $hint = '备注里的「失败：…」是上一轮结果，处理后再重试；成功升级后会自动消失'
+    }
+
     Show-Table -Headers @('编号', '分档', '名称', '版本跨度', '包 ID', '大小', '备注') `
-               -Rows $rows -MinWidths @(5, 8, 24, 18, 18, 9, 14) `
+               -Rows $rows -MinWidths $minWidths `
                -FlexColumn 2 -RowColors $colors `
                -Caption '可更新软件清单' `
-               -Hint '分档：常规=工具/运行库，注意=客户端类，驱动=建议单独确认；大小探测不到时显示 -'
+               -Hint $hint
+
+    if ($hasFail) {
+        Write-Host ''
+        Write-Host '  上一轮失败原因（清单刷新后仍保留）：' -ForegroundColor Yellow
+        foreach ($l in $failLines) {
+            $line = ("    [{0}] {1}：{2}" -f $l.Index, $l.Name, $l.Reason)
+            Write-Host (Limit-ConsoleWidth -Text $line -MaxCells ([Math]::Max(30, (Get-ConsoleSize).W - 2))) -ForegroundColor DarkYellow
+        }
+    }
 }
 
 function Invoke-UpgradeCheck {
@@ -1895,6 +1928,19 @@ function Invoke-UpgradeRun {
                 }
                 Write-Host '  提示：403 多为厂商源站/镜像问题，稍后重试或手动安装；软件正在运行请先关闭。' -ForegroundColor DarkYellow
                 Write-Host '  可直接在下面刷新后的清单里选「手动挑选」重试（编号以新清单为准）。' -ForegroundColor DarkYellow
+            }
+        }
+
+        # 把本轮失败原因记住，下一轮刷新后的清单备注里继续显示；成功则清除
+        if (-not $DryRun) {
+            if ($null -eq $script:UpgradeFailNotes) { $script:UpgradeFailNotes = @{} }
+            foreach ($res in $results) {
+                $rid = [string]$res.Id
+                if ($res.Status -eq '成功' -or $res.Status -eq '跳过') {
+                    if ($script:UpgradeFailNotes.ContainsKey($rid)) { $script:UpgradeFailNotes.Remove($rid) }
+                } else {
+                    $script:UpgradeFailNotes[$rid] = [string]$res.Detail
+                }
             }
         }
 

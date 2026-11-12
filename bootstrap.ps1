@@ -27,7 +27,7 @@
 
     # SHA256 of the hosted main script. MUST be refreshed on every release.
     # Get it with: (Get-FileHash .\src\CleanWindowsDirtyApp.ps1 -Algorithm SHA256).Hash
-    $Sha256 = 'D614B5F2E61D0E9C69FB8184968BB4DB329B81FD84A32B1369EAF03290DC75F1'
+    $Sha256 = '2B51BB7B5E3EA6663E73FCC857D0CFEDC119C066FA70E6FE8540198E4E34A492'
 
     $ErrorActionPreference = 'Stop'
     $ProgressPreference   = 'SilentlyContinue'
