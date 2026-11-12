@@ -1,0 +1,5 @@
+# Keep PowerShell / batch files byte-for-byte identical to the local copies.
+# The main script is UTF-8 with BOM and CRLF; any newline conversion would make
+# the SHA256 published in bootstrap.ps1 mismatch the hosted file.
+*.ps1 -text
+*.bat -text

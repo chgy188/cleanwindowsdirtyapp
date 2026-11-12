@@ -1,0 +1,13 @@
+# Local scan results, logs and registry backups contain this machine's
+# installed-software inventory. Never publish them to a public repo or site.
+reports/
+logs/
+backups/
+
+# IDE / assistant working data (kept locally, not part of the release)
+.codebuddy/
+
+# Windows noise
+Thumbs.db
+Desktop.ini
+*.tmp
