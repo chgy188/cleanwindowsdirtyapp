@@ -1478,6 +1478,80 @@ function Read-WingetProgress {
     return [pscustomobject]@{ Phase = $newPhase; Percent = $newPercent; SizeText = $newSize }
 }
 
+function Get-UpgradeFailureReason {
+    <#
+      把 winget 的原始输出翻成一句中文短原因。
+      结果表格的「详情」列很窄，这里只给结论，技术细节另放。
+    #>
+    param([int]$Code, [string]$Text)
+
+    $t = [string]$Text
+
+    # winget 有时退出码是 0，但 MSIX 部署其实失败了，所以这些特征要优先判
+    if ($t -match '0x80073D02|需要关闭以下应用|close the following app|无法安装，因为需要关闭') {
+        return '软件正在运行，关闭后重试'
+    }
+    if ($t -match '0x80190193|已禁止\s*[（(]?\s*403|返回状态[:：]?\s*403|Returned status:\s*403|HTTP\s+403|403\s+Forbidden|Download request failed[^\r\n]{0,80}403') {
+        return '下载被服务器拒绝 403，稍后重试或手动安装'
+    }
+    if ($t -match '0x80072EFD|0x80072EE7|0x80072F8F|无法连接到|无法连接|could not connect|connection.*timed out|连接超时|网络错误') {
+        return '网络连接失败，检查网络后重试'
+    }
+    if ($t -match '哈希不匹配|hash does not match|hash mismatch|校验失败|Installer hash') {
+        return '安装包校验失败，清理缓存后重试'
+    }
+    if ($t -match '0x80070005|拒绝访问|Access is denied|需要管理员|权限不足') {
+        return '权限不足，需以管理员运行'
+    }
+    if ($t -match '磁盘空间|not enough space|insufficient disk') {
+        return '磁盘空间不足'
+    }
+    if ($t -match '0x80070666|0x80070667|已安装了另一个版本|another version is already installed') {
+        return '版本冲突，需先卸载旧版本'
+    }
+    if ($t -match 'Installer failed|安装器失败|安装失败|安装程序返回|安装程序失败') {
+        return '安装器执行失败，可能需要交互确认'
+    }
+    if ($t -match '找不到|not found|没有找到匹配|no package found') {
+        return '源里找不到该包或版本不匹配'
+    }
+
+    if ($Code -eq 0) { return '' }
+    return '升级未完成（winget 返回非零退出码）'
+}
+
+function Resolve-UpgradeOutcome {
+    <#
+      统一判定升级结果。Status 是状态，Detail 是给用户看的一句中文，
+      Tech 是退出码等技术信息（只在失败时用到）。
+    #>
+    param([int]$Code, [string]$StdOut, [string]$StdErr)
+
+    $all    = ([string]$StdOut + "`n" + [string]$StdErr)
+    $reason = Get-UpgradeFailureReason -Code $Code -Text $all
+    $tech   = ("exit {0}" -f $Code)
+
+    # 明确的失败特征优先于退出码：winget 对「MSIX 部署失败」可能仍返回 0
+    $hardFail = '0x80073D02|需要关闭以下应用|0x80190193|已禁止\s*[（(]?\s*403|Returned status:\s*403|Installer failed|安装失败'
+    if ($all -match $hardFail) {
+        if ([string]::IsNullOrWhiteSpace($reason)) { $reason = '升级未完成，请重试' }
+        return [pscustomobject]@{ Status = '失败'; Detail = $reason; Tech = $tech }
+    }
+
+    if ($Code -eq 0 -or $all -match '已成功安装|Successfully installed|成功安装') {
+        $note = ''
+        if ($Code -ne 0) { $note = '已完成安装（安装器可能要求重启）' }
+        return [pscustomobject]@{ Status = '成功'; Detail = $note; Tech = '' }
+    }
+
+    if ($Code -eq -1978335189 -or $all -match '找不到可用的升级|No available upgrade|没有可用的较新') {
+        return [pscustomobject]@{ Status = '跳过'; Detail = '已是最新版本，无需更新'; Tech = '' }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($reason)) { $reason = '升级未完成，请重试' }
+    return [pscustomobject]@{ Status = '失败'; Detail = $reason; Tech = $tech }
+}
+
 function Invoke-WingetUpgradeOne {
     <#
       升级单个包。带超时：大体积软件可能下载很久，超时后终止并记为「超时」。
@@ -1532,12 +1606,17 @@ function Invoke-WingetUpgradeOne {
             try { $line = $lineTask.Result } catch {}
             if ($null -eq $line) { break }   # 输出流结束
 
-            # winget 用 \r 原地刷新进度，同一次读取里可能混着多段，只取最后一段
+            # winget 用 \r 原地刷新进度，同一次读取里可能混着多段。
+            # 全部留作诊断依据（错误可能出现在被覆盖的前一段里），
+            # 只用最后一段渲染进度条。
             $parts = @($line -split "`r" | Where-Object { $_.Trim() })
             if ($parts.Count -gt 0) {
+                foreach ($seg in $parts) {
+                    $s = $seg.Trim()
+                    if ($s) { [void]$outSb.AppendLine($s) }
+                }
                 $text = $parts[$parts.Count - 1].Trim()
                 if ($text) {
-                    if ($text -ne $lastText) { [void]$outSb.AppendLine($text); $lastText = $text }
                     $p = Read-WingetProgress -Text $text -Phase $phase -Percent $percent `
                                              -SizeText $sizeText -CacheKey $CacheKey
                     $phase = $p.Phase; $percent = $p.Percent; $sizeText = $p.SizeText
@@ -1586,7 +1665,8 @@ function Invoke-WingetUpgradeOne {
     }
 
     try { [void]$proc.WaitForExit(3000) } catch {}
-    try { [void]$errTask.Result } catch {}
+    $errText = ''
+    try { $errText = [string]$errTask.Result } catch { $errText = '' }
 
     $out = $outSb.ToString()
 
@@ -1594,28 +1674,8 @@ function Invoke-WingetUpgradeOne {
     try { $code = [int]$proc.ExitCode } catch { $code = $null }
     if ($null -eq $code) { $code = -1 }
 
-    $tail = @($out -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 2)
-    $detail = $tail -join ' / '
-
-    if ($code -eq 0) {
-        return [pscustomobject]@{ Id = $Id; Status = '成功'; Detail = '' }
-    }
-
-    # winget 返回 0x8A15002B（-1978335189）：没有可用的更新，说明已经是最新版。
-    if ($code -eq -1978335189 -or $out -match '找不到可用的升级|No available upgrade|没有可用的较新') {
-        return [pscustomobject]@{ Id = $Id; Status = '跳过'; Detail = '已是最新版本，无需更新' }
-    }
-
-    # winget 对部分安装器会返回非 0（如安装完成但要求重启），实际已经装好。
-    if ($out -match '已成功安装|Successfully installed|成功安装') {
-        return [pscustomobject]@{
-            Id     = $Id
-            Status = '成功'
-            Detail = ("已完成安装（退出码 {0}，安装器可能要求重启）: {1}" -f $code, $detail)
-        }
-    }
-
-    return [pscustomobject]@{ Id = $Id; Status = '失败'; Detail = ("exit {0}  {1}" -f $code, $detail) }
+    # stderr 也要一起判定：winget 的下载/部署错误常常只写在那边。
+    return (Resolve-UpgradeOutcome -Code $code -StdOut $out -StdErr $errText)
 }
 
 function Select-UpgradeTargets {
@@ -1782,7 +1842,7 @@ function Invoke-UpgradeRun {
 
             $cacheKey = [string]$t.Id + '|' + [string]$t.Available
             $r = Invoke-WingetUpgradeOne -Id $t.Id -CacheKey $cacheKey
-            $results.Add([pscustomobject]@{ Name = $t.Name; Id = $t.Id; Status = $r.Status; Detail = $r.Detail })
+            $results.Add([pscustomobject]@{ Name = $t.Name; Id = $t.Id; Status = $r.Status; Detail = $r.Detail; Tech = $r.Tech })
 
             if ($r.Status -eq '成功') {
                 Write-Host '        OK' -ForegroundColor Green
@@ -1790,6 +1850,10 @@ function Invoke-UpgradeRun {
                 Write-Host '        已是最新' -ForegroundColor Yellow
             } else {
                 Write-Host ("        {0}" -f $r.Status) -ForegroundColor Red
+                if ($r.Detail) {
+                    $why = Limit-ConsoleWidth -Text ("  原因：" + [string]$r.Detail) -MaxCells ([Math]::Max(20, $maxCols - 8))
+                    Write-Host ('        ' + $why) -ForegroundColor DarkYellow
+                }
             }
         }
 
@@ -1821,7 +1885,15 @@ function Invoke-UpgradeRun {
                 Show-Table -Headers @('名称', '状态', '详情') -Rows $failRows `
                            -MinWidths @(24, 10, 36) -FlexColumn 2 -RowColors $failColors
                 Write-Host ''
-                Write-Host '  常见原因：软件正在运行、需要交互确认、源里版本不匹配、下载超时。' -ForegroundColor DarkYellow
+                $techLines = @($failed | Where-Object { $_.Tech })
+                if ($techLines.Count -gt 0) {
+                    Write-Host '  技术信息（供排查）：' -ForegroundColor DarkGray
+                    foreach ($f in $techLines) {
+                        Write-Host ("    {0}  {1}" -f $f.Name, $f.Tech) -ForegroundColor DarkGray
+                    }
+                    Write-Host ''
+                }
+                Write-Host '  提示：403 多为厂商源站/镜像问题，稍后重试或手动安装；软件正在运行请先关闭。' -ForegroundColor DarkYellow
                 Write-Host '  可直接在下面刷新后的清单里选「手动挑选」重试（编号以新清单为准）。' -ForegroundColor DarkYellow
             }
         }
