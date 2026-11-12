@@ -27,23 +27,25 @@
 
 ## 一条命令远程运行（服务器托管）
 
-把脚本放到任意 HTTPS 静态服务器上，用户不用下载压缩包、不用记参数，只执行一条命令：
+脚本已托管在 Cloudflare Pages，用户不用下载压缩包、不用记参数，只执行一条命令：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://HOST/bootstrap.ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://cleanwindowsdirtyapp.pages.dev/bootstrap.ps1 | iex"
 ```
 
 如果已经在 PowerShell 窗口里，更短的形式也可以：
 
 ```powershell
-irm https://HOST/bootstrap.ps1 | iex
+irm https://cleanwindowsdirtyapp.pages.dev/bootstrap.ps1 | iex
 ```
 
-**托管方要做的三件事**
+`$Sources` 按「Pages → GitHub raw → 四个 GitHub raw 前缀镜像」依次回退，`$Sha256` 已填发布版本主脚本的哈希。
 
-1. 把 `bootstrap.ps1` 和 `src/CleanWindowsDirtyApp.ps1` 上传到**同一个 HTTP 目录**，主脚本文件名必须保持 `CleanWindowsDirtyApp.ps1`（下载路径固定为 `<源>/CleanWindowsDirtyApp.ps1`）。
-2. 编辑 `bootstrap.ps1` 顶部的 `$Sources`，把占位地址换成实际目录 URL。可以填多个源，第一个失败会自动依次尝试后面的；若走 GitHub raw，取消文件里 `gh-proxy.org` / `gh-proxy.com` / `github.tbap.top` / `ghfile-geekertao.top` 对应行的注释即可。这些是 **URL 前缀型镜像**，只用于下载脚本自身，不会改变 winget 的升级源。
-3. 可选但强烈建议：把主脚本的 SHA256 填进 `$Sha256`：
+**自建托管时要做的三件事**
+
+1. 把 `bootstrap.ps1` 和 `src/CleanWindowsDirtyApp.ps1` 上传到 HTTPS 主机，主脚本文件名必须保持 `CleanWindowsDirtyApp.ps1`；`$Sources` 填的是**主脚本所在目录**（本项目为 `/src`），bootstrap 放在任意可访问路径都行。
+2. 编辑 `bootstrap.ps1` 顶部的 `$Sources`。可填多个源，第一个失败会自动依次尝试后面的；GitHub raw 可配合 `gh-proxy.org` / `gh-proxy.com` / `github.tbap.top` / `ghfile-geekertao.top` 这类 **URL 前缀型镜像**兜底（只用于下载脚本自身，不会改变 winget 的升级源）。用 Cloudflare Pages 时建议同时发布 `_headers`，给两个 `.ps1` 指定 `Content-Type: text/plain; charset=utf-8`，否则部分客户端会把响应当二进制。
+3. 可选但强烈建议：把主脚本的 SHA256 填进 `$Sha256`（**每次更新主脚本都要同步更新并重新部署，否则用户下载会被校验拦下**）：
 
    ```powershell
    (Get-FileHash .\src\CleanWindowsDirtyApp.ps1 -Algorithm SHA256).Hash
@@ -56,6 +58,8 @@ irm https://HOST/bootstrap.ps1 | iex
 `bootstrap.ps1` 是纯 ASCII 的短脚本，专门为了让 `irm | iex` 可靠：它把主脚本下载到 `%USERPROFILE%\CleanWindowsDirtyApp\CleanWindowsDirtyApp.ps1`，校验通过后自动请求管理员权限，再以 `-File` 方式启动主脚本并传入 `-OutputRoot`，所以 `.reg` 备份会落在同一目录下的 `backups/`。下载源全部失败时直接报错退出，**不会执行任何东西**，也不会用失败残留覆盖已有的可用脚本。
 
 不直接 `irm 主脚本 | iex` 的原因：主脚本是 UTF-8 BOM 且依赖 `$PSScriptRoot`，从字符串执行时取值不可靠；提权和备份目录也需要一个确定的本地路径。
+
+**发布流程**：改完脚本 → `git push` 到 GitHub → 重新计算主脚本 SHA256 并更新 `bootstrap.ps1` 的 `$Sha256` → 用 `wrangler pages deploy <发布目录> --project-name cleanwindowsdirtyapp --branch main` 重新部署。发布目录只放 `bootstrap.ps1`、`src/CleanWindowsDirtyApp.ps1` 和 `_headers`，不要把本机扫描结果传上去。当前 Pages 项目是 Wrangler 的 **Direct Upload** 类型，不会自动跟随 GitHub 提交。
 
 > **安全提示**：`irm | iex` 等于把服务器返回的内容直接当代码执行，只填自己控制的 HTTPS 源，并填写 SHA256。
 >

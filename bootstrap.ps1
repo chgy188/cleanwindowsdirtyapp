@@ -1,9 +1,11 @@
 # CleanWindowsDirtyApp - remote bootstrap (ASCII only, safe for: irm URL | iex)
 #
-# Upload this file and src/CleanWindowsDirtyApp.ps1 to the SAME directory on your
-# HTTPS host, then edit $Sources below. Users then run ONE command:
+# Published at https://cleanwindowsdirtyapp.pages.dev/ (Cloudflare Pages).
+# This file and src/CleanWindowsDirtyApp.ps1 must stay in the same hosted tree;
+# $Sources below points at the directory that holds the main script.
+# Users then run ONE command:
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://HOST/bootstrap.ps1 | iex"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://cleanwindowsdirtyapp.pages.dev/bootstrap.ps1 | iex"
 #
 # Why a bootstrap instead of piping the main script directly:
 #   * the main script uses $PSScriptRoot and is UTF-8 with BOM -> it must be saved
@@ -13,18 +15,19 @@
 
 & {
     # First URL is the primary source; the rest are tried in order when it fails.
-    # The commented examples use the GitHub proxies you provided for raw files.
+    # GitHub raw and the four URL-prefix mirrors are fallbacks for the Pages host.
     $Sources = @(
-        'https://YOUR-HOST.example.com/cwda'
-        # 'https://gh-proxy.org/https://raw.githubusercontent.com/USER/REPO/main/dist'
-        # 'https://gh-proxy.com/https://raw.githubusercontent.com/USER/REPO/main/dist'
-        # 'https://github.tbap.top/https://raw.githubusercontent.com/USER/REPO/main/dist'
-        # 'https://ghfile-geekertao.top/https://raw.githubusercontent.com/USER/REPO/main/dist'
+        'https://cleanwindowsdirtyapp.pages.dev/src'
+        'https://raw.githubusercontent.com/chgy188/cleanwindowsdirtyapp/main/src'
+        'https://gh-proxy.org/https://raw.githubusercontent.com/chgy188/cleanwindowsdirtyapp/main/src'
+        'https://gh-proxy.com/https://raw.githubusercontent.com/chgy188/cleanwindowsdirtyapp/main/src'
+        'https://github.tbap.top/https://raw.githubusercontent.com/chgy188/cleanwindowsdirtyapp/main/src'
+        'https://ghfile-geekertao.top/https://raw.githubusercontent.com/chgy188/cleanwindowsdirtyapp/main/src'
     )
 
-    # Optional but recommended: SHA256 of CleanWindowsDirtyApp.ps1.
+    # SHA256 of the hosted main script. MUST be refreshed on every release.
     # Get it with: (Get-FileHash .\src\CleanWindowsDirtyApp.ps1 -Algorithm SHA256).Hash
-    $Sha256 = ''
+    $Sha256 = '48FE42476DF500D47464E853432B13AABE41EB9B07DEE13DAC79F97E09186F2F'
 
     $ErrorActionPreference = 'Stop'
     $ProgressPreference   = 'SilentlyContinue'
