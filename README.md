@@ -1,5 +1,13 @@
 ﻿# CleanWindowsDirtyApp
 
+> **一条命令运行（推荐）**：复制下面这一行，粘贴到 PowerShell 或 CMD 执行即可。会自动下载脚本、做 SHA256 校验、请求管理员权限并进入交互菜单，本机不用预先安装任何东西。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://cleanwindowsdirtyapp.pages.dev/bootstrap.ps1 | iex"
+```
+
+已经在 PowerShell 窗口里的话，直接 `irm https://cleanwindowsdirtyapp.pages.dev/bootstrap.ps1 | iex` 即可；托管与自建说明见下方「一条命令远程运行」。
+
 清理 Windows「设置 → 应用 → 已安装的应用」列表里**指向已不存在软件**的残留条目（下称"幽灵条目"）。
 
 典型场景：某个软件早就删了 / 目录被手动删了，但设置里那一行还在，点"卸载"报错或毫无反应。
