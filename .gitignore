@@ -7,6 +7,9 @@ backups/
 # IDE / assistant working data (kept locally, not part of the release)
 .codebuddy/
 
+# Wrangler local state/cache created by `wrangler pages deploy`
+.wrangler/
+
 # Windows noise
 Thumbs.db
 Desktop.ini
